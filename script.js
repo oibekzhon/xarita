@@ -61,7 +61,9 @@ let unsubRequests = null;
 let unsubCurrentUserDoc = null;
 let gpsWatchId = null;
 let friendDocListeners = {};
+let friendPresenceListeners = {};
 let friendMarkers = {};
+let friendPresenceCache = {};
 let presenceRef = null;
 let connectedRef = null;
 
@@ -517,6 +519,12 @@ async function ensureUserProfileDocument(user) {
   return data;
 }
 
+function clearFriendPresenceListeners() {
+  Object.values(friendPresenceListeners).forEach((unsubscribe) => unsubscribe());
+  friendPresenceListeners = {};
+  friendPresenceCache = {};
+}
+
 function clearSessionUI() {
   friendsPanel.style.display = "none";
 
@@ -526,6 +534,7 @@ function clearSessionUI() {
 
   Object.values(friendDocListeners).forEach((u) => u());
   friendDocListeners = {};
+  clearFriendPresenceListeners();
 
   if (gpsWatchId !== null) {
     navigator.geolocation.clearWatch(gpsWatchId);
@@ -641,6 +650,7 @@ auth.onAuthStateChanged(async (user) => {
 
     Object.values(friendDocListeners).forEach((u) => u());
     friendDocListeners = {};
+    clearFriendPresenceListeners();
 
     unsubFriends = listenFriendsLocations(user.uid);
     unsubRequests = listenFriendRequests(user.uid);
@@ -734,12 +744,28 @@ function startGPSTracking(uid) {
   );
 }
 
+function listenFriendPresence(uid, onChange) {
+  const ref = rtdb.ref(`/status/${uid}`);
+  const handler = (snapshot) => {
+    friendPresenceCache[uid] = snapshot.val() || { online: false };
+    onChange();
+  };
+
+  ref.on("value", handler);
+
+  return () => {
+    ref.off("value", handler);
+    delete friendPresenceCache[uid];
+  };
+}
+
 function listenFriendsLocations(uid) {
   return db.collection("friends")
     .where("users", "array-contains", uid)
     .onSnapshot((snap) => {
       Object.values(friendDocListeners).forEach((u) => u());
       friendDocListeners = {};
+      clearFriendPresenceListeners();
 
       Object.values(friendMarkers).forEach((m) => map.removeLayer(m));
       friendMarkers = {};
@@ -777,11 +803,12 @@ function listenFriendsLocations(uid) {
           if (!data) continue;
 
           renderedCount++;
+
           const nickname = data.nickname ? "@" + data.nickname : data.name;
           const hasLocation =
             typeof data.location?.lat === "number" &&
             typeof data.location?.lon === "number";
-          const isOnline = Boolean(data.online && hasLocation);
+          const isOnline = Boolean(friendPresenceCache[fuid]?.online === true && hasLocation);
           const cityLabel = isOnline
             ? (data.location.city || "Joy noma'lum")
             : "Offline";
@@ -835,6 +862,8 @@ function listenFriendsLocations(uid) {
           friendDataCache[fuid] = docSnap.data();
           rebuildFriendsList();
         });
+
+        friendPresenceListeners[fuid] = listenFriendPresence(fuid, rebuildFriendsList);
       }
     });
 }
