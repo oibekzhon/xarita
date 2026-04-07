@@ -63,6 +63,7 @@ let gpsWatchId = null;
 let friendDocListeners = {};
 let friendMarkers = {};
 let presenceRef = null;
+let connectedRef = null;
 
 map.on("click", function (e) {
   goToLocation(e.latlng.lat, e.latlng.lng);
@@ -76,11 +77,13 @@ function saveToHistory(lat, lon, name) {
   const isDuplicate = locationHistory.length > 0 &&
     Math.abs(locationHistory[0].lat - lat) < 0.001 &&
     Math.abs(locationHistory[0].lon - lon) < 0.001;
+
   if (!isDuplicate) {
     locationHistory.unshift({ lat, lon, name });
     if (locationHistory.length > 10) locationHistory.pop();
     localStorage.setItem("locationHistory", JSON.stringify(locationHistory));
   }
+
   updateHistoryBtn();
 }
 
@@ -125,8 +128,8 @@ function fetchWeather(lat, lon) {
   loading.style.display = "flex";
 
   fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`)
-    .then(r => r.json())
-    .then(data => {
+    .then((r) => r.json())
+    .then((data) => {
       loading.style.display = "none";
 
       document.getElementById("placeholder").style.display = "none";
@@ -154,8 +157,7 @@ function fetchWeather(lat, lon) {
       const sunset = new Date(data.sys.sunset * 1000);
       document.getElementById("sunset").innerText = pad(sunset.getHours()) + ":" + pad(sunset.getMinutes());
 
-      document.getElementById("coords").innerText =
-        lat.toFixed(4) + "° N,  " + lon.toFixed(4) + "° E";
+      document.getElementById("coords").innerText = `${lat.toFixed(4)}° N,  ${lon.toFixed(4)}° E`;
 
       const url = new URL(window.location.href);
       url.searchParams.set("lat", lat.toFixed(6));
@@ -195,8 +197,8 @@ function startClock(cityName, timezoneOffset) {
   function tick() {
     const nowUTC = Date.now() + new Date().getTimezoneOffset() * 60000;
     const local = new Date(nowUTC + timezoneOffset * 1000);
-    elTime.textContent = pad(local.getHours()) + ":" + pad(local.getMinutes()) + ":" + pad(local.getSeconds());
-    elDate.textContent = weekdays[local.getDay()] + ", " + local.getDate() + " " + months[local.getMonth()] + " " + local.getFullYear();
+    elTime.textContent = `${pad(local.getHours())}:${pad(local.getMinutes())}:${pad(local.getSeconds())}`;
+    elDate.textContent = `${weekdays[local.getDay()]}, ${local.getDate()} ${months[local.getMonth()]} ${local.getFullYear()}`;
   }
 
   if (clockInterval) clearInterval(clockInterval);
@@ -302,21 +304,23 @@ searchBtn.addEventListener("click", () => {
 function doSearch(q) {
   if (!q) return;
   fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=5&accept-language=uz`)
-    .then(r => r.json())
-    .then(results => {
+    .then((r) => r.json())
+    .then((results) => {
       searchResults.innerHTML = "";
       if (results.length === 0) {
         searchResults.style.display = "block";
         searchResults.innerHTML = `<div class="search-result-item" style="color:#636366;">Natija topilmadi</div>`;
         return;
       }
+
       searchResults.style.display = "block";
-      results.forEach(item => {
+      results.forEach((item) => {
         const div = document.createElement("div");
         div.className = "search-result-item";
         const parts = item.display_name.split(",");
         const main = parts[0].trim();
         const sub = parts.slice(1, 3).join(",").trim();
+
         div.innerHTML = `<div>${main}</div><div class="result-sub">${sub}</div>`;
         div.addEventListener("click", () => {
           map.setView([parseFloat(item.lat), parseFloat(item.lon)], 10);
@@ -324,6 +328,7 @@ function doSearch(q) {
           searchResults.style.display = "none";
           searchInput.value = main;
         });
+
         searchResults.appendChild(div);
       });
     })
@@ -341,8 +346,10 @@ document.getElementById("locateBtn").addEventListener("click", () => {
     alert("Brauzeringiz joylashuvni aniqlamaydi.");
     return;
   }
+
   const btn = document.getElementById("locateBtn");
   btn.classList.add("active");
+
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       map.setView([pos.coords.latitude, pos.coords.longitude], 12);
@@ -360,6 +367,7 @@ document.getElementById("locateBtn").addEventListener("click", () => {
   const params = new URLSearchParams(window.location.search);
   const lat = parseFloat(params.get("lat"));
   const lon = parseFloat(params.get("lon"));
+
   if (!isNaN(lat) && !isNaN(lon)) {
     map.setView([lat, lon], 10);
     goToLocation(lat, lon);
@@ -379,6 +387,7 @@ function isValidNickname(n) {
 nicknameInput.addEventListener("input", () => {
   clearTimeout(nicknameCheckTimeout);
   const val = nicknameInput.value.trim().toLowerCase();
+
   nicknameSaveBtn.disabled = true;
   nicknameStatus.textContent = "";
   nicknameStatus.className = "nickname-status";
@@ -437,6 +446,7 @@ nicknameSaveBtn.addEventListener("click", async () => {
 async function checkAndShowNicknameModal(user) {
   const snap = await db.collection("users").doc(user.uid).get();
   if (!snap.exists) return;
+
   const data = snap.data();
   if (!data.nickname) {
     nicknameInput.value = "";
@@ -466,13 +476,36 @@ loginWarningBackdrop.addEventListener("click", (e) => {
   if (e.target === loginWarningBackdrop) loginWarningBackdrop.classList.remove("visible");
 });
 
+async function ensureUserProfileDocument(user) {
+  const userRef = db.collection("users").doc(user.uid);
+  const snap = await userRef.get();
+
+  if (!snap.exists) {
+    await userRef.set({
+      uid: user.uid,
+      name: user.displayName,
+      email: user.email,
+      photo: user.photoURL,
+      nickname: null,
+      online: false,
+      blocked: false,
+      location: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    return { blocked: false };
+  }
+
+  return snap.data();
+}
+
 function clearSessionUI() {
   friendsPanel.style.display = "none";
+
   if (unsubFriends) { unsubFriends(); unsubFriends = null; }
   if (unsubRequests) { unsubRequests(); unsubRequests = null; }
   if (unsubCurrentUserDoc) { unsubCurrentUserDoc(); unsubCurrentUserDoc = null; }
 
-  Object.values(friendDocListeners).forEach(u => u());
+  Object.values(friendDocListeners).forEach((u) => u());
   friendDocListeners = {};
 
   if (gpsWatchId !== null) {
@@ -480,12 +513,17 @@ function clearSessionUI() {
     gpsWatchId = null;
   }
 
+  if (connectedRef) {
+    connectedRef.off();
+    connectedRef = null;
+  }
+
   if (presenceRef) {
     presenceRef.onDisconnect().cancel().catch(() => {});
     presenceRef = null;
   }
 
-  Object.values(friendMarkers).forEach(m => map.removeLayer(m));
+  Object.values(friendMarkers).forEach((m) => map.removeLayer(m));
   friendMarkers = {};
 
   document.getElementById("friendsList").innerHTML = '<div class="friends-empty">Hali do\'stlar yo\'q</div>';
@@ -504,7 +542,7 @@ async function setPresenceOffline(uid) {
 
 function startPresence(uid) {
   presenceRef = rtdb.ref(`/status/${uid}`);
-  const connectedRef = rtdb.ref(".info/connected");
+  connectedRef = rtdb.ref(".info/connected");
 
   connectedRef.on("value", (snap) => {
     if (snap.val() !== true) return;
@@ -522,21 +560,8 @@ function startPresence(uid) {
 }
 
 async function enforceAccountState(user) {
-  const deletedSnap = await db.collection("deletedUsers").doc(user.uid).get();
-  if (deletedSnap.exists) {
-    await auth.signOut();
-    alert("Sizning hisobingiz o'chirilgan.");
-    return false;
-  }
+  const data = await ensureUserProfileDocument(user);
 
-  const userSnap = await db.collection("users").doc(user.uid).get();
-  if (!userSnap.exists) {
-    await auth.signOut();
-    alert("Hisob topilmadi.");
-    return false;
-  }
-
-  const data = userSnap.data();
   if (data.blocked) {
     await auth.signOut();
     alert("Sizning hisobingiz bloklangan.");
@@ -553,11 +578,6 @@ function watchOwnAccount(uid) {
     if (!auth.currentUser || auth.currentUser.uid !== uid) return;
 
     if (!docSnap.exists) {
-      const deletedSnap = await db.collection("deletedUsers").doc(uid).get();
-      if (deletedSnap.exists) {
-        await auth.signOut();
-        alert("Hisobingiz admin tomonidan o'chirildi.");
-      }
       return;
     }
 
@@ -590,6 +610,9 @@ auth.onAuthStateChanged(async (user) => {
     await db.collection("users").doc(user.uid).set({
       online: true,
       blocked: false,
+      name: user.displayName,
+      email: user.email,
+      photo: user.photoURL,
     }, { merge: true }).catch(() => {});
 
     startPresence(user.uid);
@@ -597,9 +620,10 @@ auth.onAuthStateChanged(async (user) => {
     watchOwnAccount(user.uid);
     await checkAndShowNicknameModal(user);
 
-    if (unsubFriends) { unsubFriends(); }
-    if (unsubRequests) { unsubRequests(); }
-    Object.values(friendDocListeners).forEach(u => u());
+    if (unsubFriends) unsubFriends();
+    if (unsubRequests) unsubRequests();
+
+    Object.values(friendDocListeners).forEach((u) => u());
     friendDocListeners = {};
 
     unsubFriends = listenFriendsLocations(user.uid);
@@ -624,33 +648,11 @@ async function doGoogleLogin() {
   try {
     const result = await auth.signInWithPopup(provider);
     const user = result.user;
+    const data = await ensureUserProfileDocument(user);
 
-    const deletedSnap = await db.collection("deletedUsers").doc(user.uid).get();
-    if (deletedSnap.exists) {
-      await auth.signOut();
-      alert("Bu hisob o'chirilgan va tizimga kira olmaydi.");
-      return;
-    }
-
-    const ref = db.collection("users").doc(user.uid);
-    const snap = await ref.get();
-
-    if (!snap.exists) {
-      await ref.set({
-        uid: user.uid,
-        name: user.displayName,
-        email: user.email,
-        photo: user.photoURL,
-        nickname: null,
-        online: false,
-        blocked: false,
-        location: null,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      });
-    } else if (snap.data()?.blocked) {
+    if (data.blocked) {
       await auth.signOut();
       alert("Bu hisob bloklangan.");
-      return;
     }
   } catch (e) {
     console.error("Login xatosi:", e);
@@ -687,8 +689,8 @@ function startGPSTracking(uid) {
       const lon = pos.coords.longitude;
 
       fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&accept-language=uz`)
-        .then(r => r.json())
-        .then(data => {
+        .then((r) => r.json())
+        .then((data) => {
           const city = data.address?.city ||
             data.address?.town ||
             data.address?.village ||
@@ -720,10 +722,10 @@ function listenFriendsLocations(uid) {
   return db.collection("friends")
     .where("users", "array-contains", uid)
     .onSnapshot((snap) => {
-      Object.values(friendDocListeners).forEach(u => u());
+      Object.values(friendDocListeners).forEach((u) => u());
       friendDocListeners = {};
 
-      Object.values(friendMarkers).forEach(m => map.removeLayer(m));
+      Object.values(friendMarkers).forEach((m) => map.removeLayer(m));
       friendMarkers = {};
 
       const listEl = document.getElementById("friendsList");
@@ -732,7 +734,7 @@ function listenFriendsLocations(uid) {
       const friendUids = [];
 
       for (const d of snap.docs) {
-        const fuid = d.data().users.find(u => u !== uid);
+        const fuid = d.data().users.find((u) => u !== uid);
         if (fuid && !seenUids.has(fuid)) {
           seenUids.add(fuid);
           friendUids.push(fuid);
@@ -748,7 +750,7 @@ function listenFriendsLocations(uid) {
 
       function rebuildFriendsList() {
         listEl.innerHTML = "";
-        Object.values(friendMarkers).forEach(m => map.removeLayer(m));
+        Object.values(friendMarkers).forEach((m) => map.removeLayer(m));
         friendMarkers = {};
 
         let renderedCount = 0;
@@ -759,13 +761,14 @@ function listenFriendsLocations(uid) {
           if (!data) continue;
 
           renderedCount++;
-
           const nickname = data.nickname ? "@" + data.nickname : data.name;
           const hasLocation =
             typeof data.location?.lat === "number" &&
             typeof data.location?.lon === "number";
           const isOnline = Boolean(data.online && hasLocation);
-          const cityLabel = isOnline ? (data.location.city || "Joy noma'lum") : "Offline";
+          const cityLabel = isOnline
+            ? (data.location.city || "Joy noma'lum")
+            : "Offline";
 
           const item = document.createElement("div");
           item.className = "friend-item";
@@ -853,7 +856,7 @@ function listenFriendRequests(uid) {
         requestsList.appendChild(div);
       }
 
-      requestsList.querySelectorAll(".req-accept").forEach(btn => {
+      requestsList.querySelectorAll(".req-accept").forEach((btn) => {
         btn.addEventListener("click", async () => {
           const rid = btn.dataset.id;
           const from = btn.dataset.from;
@@ -871,7 +874,7 @@ function listenFriendRequests(uid) {
         });
       });
 
-      requestsList.querySelectorAll(".req-decline").forEach(btn => {
+      requestsList.querySelectorAll(".req-decline").forEach((btn) => {
         btn.addEventListener("click", () => {
           db.collection("friendRequests").doc(btn.dataset.id).delete();
         });
