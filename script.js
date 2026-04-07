@@ -66,6 +66,7 @@ let friendMarkers = {};
 let friendPresenceCache = {};
 let presenceRef = null;
 let connectedRef = null;
+let presenceHandlersBound = false;
 
 map.on("click", function (e) {
   goToLocation(e.latlng.lat, e.latlng.lng);
@@ -559,13 +560,36 @@ function clearSessionUI() {
   document.getElementById("requestsList").innerHTML = "";
 }
 
-async function setPresenceOffline(uid) {
+async function markOfflineNow(uid) {
+  if (!uid) return;
+
+  try {
+    await db.collection("users").doc(uid).set({
+      online: false,
+    }, { merge: true });
+  } catch (e) {}
+
   try {
     await rtdb.ref(`/status/${uid}`).set({
       online: false,
       lastSeen: firebase.database.ServerValue.TIMESTAMP,
     });
   } catch (e) {}
+}
+
+function bindPresenceLifecycle(uid) {
+  if (presenceHandlersBound) return;
+  presenceHandlersBound = true;
+
+  const goOffline = () => {
+    if (auth.currentUser && auth.currentUser.uid === uid) {
+      markOfflineNow(uid);
+    }
+  };
+
+  window.addEventListener("pagehide", goOffline);
+  window.addEventListener("beforeunload", goOffline);
+  window.addEventListener("unload", goOffline);
 }
 
 function startPresence(uid) {
@@ -585,6 +609,8 @@ function startPresence(uid) {
       lastSeen: firebase.database.ServerValue.TIMESTAMP,
     }).catch(() => {});
   });
+
+  bindPresenceLifecycle(uid);
 }
 
 async function enforceAccountState(user) {
@@ -690,11 +716,10 @@ lwConfirmBtn.addEventListener("click", doGoogleLogin);
 authBtn.addEventListener("click", async () => {
   if (currentUser) {
     try {
+      await markOfflineNow(currentUser.uid);
       await db.collection("users").doc(currentUser.uid).set({
-        online: false,
         location: null,
       }, { merge: true });
-      await setPresenceOffline(currentUser.uid);
     } catch (e) {}
     await auth.signOut();
   } else {
