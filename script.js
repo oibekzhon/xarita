@@ -35,7 +35,7 @@ const firebaseConfig = {
   storageBucket: "xarita-c567b.firebasestorage.app",
   messagingSenderId: "766862887081",
   appId: "1:766862887081:web:92d580b836f541707381b8",
-  databaseURL: "https://xarita-c567b-default-rtdb.firebaseio.com",
+  databaseURL: "https://xarita-c567b-default-rtdb.asia-southeast1.firebasedatabase.app",
 };
 
 firebase.initializeApp(firebaseConfig);
