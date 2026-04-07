@@ -492,10 +492,29 @@ async function ensureUserProfileDocument(user) {
       location: null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    return { blocked: false };
+
+    return {
+      uid: user.uid,
+      name: user.displayName,
+      email: user.email,
+      photo: user.photoURL,
+      nickname: null,
+      online: false,
+      blocked: false,
+      location: null,
+      createdAt: true,
+    };
   }
 
-  return snap.data();
+  const data = snap.data();
+
+  if (!data.createdAt) {
+    await userRef.set({
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  return data;
 }
 
 function clearSessionUI() {
@@ -576,10 +595,7 @@ function watchOwnAccount(uid) {
 
   unsubCurrentUserDoc = db.collection("users").doc(uid).onSnapshot(async (docSnap) => {
     if (!auth.currentUser || auth.currentUser.uid !== uid) return;
-
-    if (!docSnap.exists) {
-      return;
-    }
+    if (!docSnap.exists) return;
 
     const data = docSnap.data();
     if (data.blocked) {
