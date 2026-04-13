@@ -821,7 +821,7 @@ body {
 .request-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 90px;
   padding: 8px 0;
 }
 
